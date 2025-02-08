@@ -1,5 +1,4 @@
 #!/opt/homebrew/bin/python3
-
 import os
 import signal
 import subprocess
@@ -11,30 +10,33 @@ def get_vm_names():
 
 def run_command(command):
     result = subprocess.run(command, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    #    result = subprocess.run(command, shell=True, check=True)
-    return result.stdout.decode('utf-8')
+    print(result.stdout.decode('utf-8'))
+    print(result.stderr.decode('utf-8'))
+    return #result.stdout.decode('utf-8')
 
 def main():
     CP = "cp1"
     try:
         if CP not in get_vm_names():
-            run_command("limactl disk create {}-data --size=50GiB --format=raw".format(CP))
-            run_command("limactl create --name=cp1 ./k8s-base.yaml --set '.additionalDisks[0].name = \"{}-data\" | .additionalDisks[0].format = false' --tty=false".format(CP))
+            ## remove disk from CP to avoid conjestion from ceph
+            ##run_command("limactl disk create {}-data --size=50GiB --format=raw".format(CP))
+            ##run_command("limactl create --name=cp1 ./k8s-base.yaml --set '.additionalDisks[0].name = \"{}-data\" | .additionalDisks[0].format = false' --tty=false".format(CP))
+            run_command("limactl create --name=cp1 ./k8s-base.yaml --tty=false")
             run_command("limactl start cp1 --tty=false")
+            print("Control Plane has been started")
 
             # Copy the kubeconfig file to the host
             run_command("cp ../data/lima/k8scfg/admin.conf ~/.kube/config")
             run_command("kubectl get nodes")
-            print("Control Plane is ready")
-
-        input("Press Enter to add worker nodes...")
+            
+        input("Ctrl+C to stop. Press Enter to add worker nodes...")
 
         for node in ["n1", "n2", "n3"]:
-            print("Creating {}".format(node))
-            run_command("limactl disk create {}-data --size=50GiB --format=raw".format(node))
-            run_command("limactl create --name={} ./k8s-base.yaml --set '.additionalDisks[0].name = \"{}-data\" | .additionalDisks[0].format = false' --tty=false".format(node, node))
-            run_command("limactl start {} --tty=false".format(node))
-            print("{} is ready".format(node))
+            print(f"Creating {node}")
+            run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
+            run_command(f"limactl create --name={node} ./k8s-base.yaml --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
+            run_command(f"limactl start {node} --tty=false")
+            print(f"{node} is ready")
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")
     except Exception as e:

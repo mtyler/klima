@@ -1,6 +1,8 @@
 #!/opt/homebrew/bin/python3
-
+import argparse
+import signal
 import subprocess
+import sys
 
 def get_vm_names():
     result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
@@ -24,7 +26,22 @@ def stop_and_remove_vm(vm_name):
 def remove_disk(d_name):
     subprocess.run(['limactl', 'disk', 'delete', d_name])
 
-def main():
+def drain_and_remove_node(vm_name):
+    print(f"Draining and removing node {vm_name}")
+    subprocess.run(['kubectl', 'drain', f"lima-{vm_name}", '--delete-local-data', '--force', '--ignore-daemonsets'])
+    subprocess.run(['kubectl', 'delete', 'node', f"lima-{vm_name}"])
+
+def main(args):
+    if args.node:
+        vm_names = get_vm_names()
+        if args.node in vm_names:
+            drain_and_remove_node(args.node)
+            stop_and_remove_vm(args.node)
+            print(f"VM {args.node} stopped and removed")
+        return
+    
+    input("This will destroy all lima VMs and disks. Press Enter to continue...")
+    
     vm_names = get_vm_names()
     for vm_name in vm_names:
         stop_and_remove_vm(vm_name)
@@ -37,6 +54,13 @@ def main():
     
     subprocess.run(['limactl', 'list'])
     subprocess.run(['limactl', 'disk', 'list'])
-    
+
+def signal_handler(sig, frame): 
+    sys.exit(0)
+        
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Destroy lima VMs and disks")
+    parser.add_argument('--node', '-n', required=False, type=str, help='remove a single node from a k8s cluster')
+    args = parser.parse_args()
+    signal.signal(signal.SIGINT, signal_handler)
+    main(args)
