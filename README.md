@@ -66,11 +66,6 @@ limactl create --name cp1 ./k8s.yaml --tty=false
 limactl start cp1
 cp /Users/mtyler/.lima/cp1/copied-from-guest/kubeconfig.yaml ~/.kube/config
 kubectl get nodes
-kubectl directpv install
-kubectl directpv discover
-kubectl directpv init drives.yaml --dangerous
-
-
 
 
 limactl disk create 
@@ -98,22 +93,3 @@ generate the worker join command on cp1
 kubeadm token create --print-join-command 
 - or - 
 use command aboave and strip off "control plane and certificate
-
-
-## ifconfig prior to shell
-bridge100: flags=8a63<UP,BROADCAST,SMART,RUNNING,ALLMULTI,SIMPLEX,MULTICAST> mtu 1500
-	options=3<RXCSUM,TXCSUM>
-	ether 5e:e9:1e:d6:2e:64
-	inet 192.168.105.1 netmask 0xffffff00 broadcast 192.168.105.255
-	inet6 fe80::5ce9:1eff:fed6:2e64%bridge100 prefixlen 64 scopeid 0x11
-	inet6 fd12:f0e2:4705:b545:4ab:4a4b:e80e:f79e prefixlen 64 autoconf secured
-	Configuration:
-		id 0:0:0:0:0:0 priority 0 hellotime 0 fwddelay 0
-		maxage 0 holdcnt 0 proto stp maxaddr 100 timeout 1200
-		root id 0:0:0:0:0:0 priority 0 ifcost 0 port 0
-		ipfilter disabled flags 0x0
-	member: vmenet0 flags=3<LEARNING,DISCOVER>
-	        ifmaxaddr 0 port 16 priority 0 path cost 0
-	nd6 options=201<PERFORMNUD,DAD>
-	media: autoselect
-	status: active
