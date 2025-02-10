@@ -40,7 +40,10 @@ def main(args):
             print(f"VM {args.node} stopped and removed")
         return
     
-    input("This will destroy all lima VMs and disks. Press Enter to continue...")
+    if not args.force:
+        input("!!! WARNING !!! \n\n \
+This is a permanent action. All lima VMs and disks will be lost forever. \n \
+Press Enter to continue...\n")
     
     vm_names = get_vm_names()
     for vm_name in vm_names:
@@ -52,6 +55,9 @@ def main(args):
         remove_disk(d_name)
     print("Disks removed")
     
+    subprocess.run(['rm', '-rf', './.klima'])
+    print("klima working directory removed")
+
     subprocess.run(['limactl', 'list'])
     subprocess.run(['limactl', 'disk', 'list'])
 
@@ -61,6 +67,7 @@ def signal_handler(sig, frame):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Destroy lima VMs and disks")
     parser.add_argument('--node', '-n', required=False, type=str, help='remove a single node from a k8s cluster')
+    parser.add_argument('--force', '-f', required=False, action='store_true', help='force remove all VMs and disks')
     args = parser.parse_args()
     signal.signal(signal.SIGINT, signal_handler)
     main(args)

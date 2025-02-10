@@ -1,21 +1,30 @@
-#
+# Klima
+
+A just-enough-k8s cluster built on Lima VM.
+
+Meant to standup and teardown quickly and easily.
 
 ## Usage
 
-start.py - starts a 4 node cluster
+klima-up.py - starts a 4 node cluster
 
-clean-all.py deletes all lima disks and vms
-
+klima-klober.py deletes all lima disks and vms
 
 below are setup notes that require cleaning...
-
+TODO - networking requires some tightening up
+TODO - code, file hygene
+TODO - Document listening 0.0.0.0
+TODO - tighten up file paths
+TODO - configuration hand-off is messy
 
 ## development environment
 
 currently we need to create a virtual python environment
-python3 -m venv venv
-source venv/bin/activate
-python3 -m pip install xyz
+Lima VM (brew install)
+socket_vmnet (binary install)
+qemu (brew install)
+
+Python3 (brew install)
 
 
 ## prereqs

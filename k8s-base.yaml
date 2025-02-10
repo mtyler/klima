@@ -2,6 +2,7 @@
 # $ limactl start ./k8s.yaml
 # $ limactl shell k8s kubectl
 
+# TODO leverage {{.Dir}} to copy share files between guests
 # It can be accessed from the host by exporting the kubeconfig file;
 # the ports are already forwarded automatically by lima:
 #
@@ -37,25 +38,17 @@ disk: "30GiB"
 # Storage
 mountType: "virtiofs"
 mounts:
-  - location: "~/Workspace/data/lima/k8scfg"
+  - location: "~/Workspace/klima/.klima/k8scfg"
     mountPoint: "/k8scfg"
     writable: true
-#- location: "~/Workspace/data/lima"
-#  mountPoint: "/storage"
-#  writable: true
 
-## 9p unsupported in ubuntu re: logs
-##  9p:
-##    securityModel: "mapped-xattr"
-##    protocolVersion: "9p2000.L"
-##    cache: "mmap"
-# mounts a drive with the name "cp1-data" in the guest
-# limactl disk create --name=cp1-data --size=10G --format=raw
-# format: false will mount the disk without formatting it
-# lima doesn't like the clever name for the disk
-#additionalDisks:
-#- name: "$(hostname | sed 's/^lima-//')-data"
-#  format: false
+#### NO IDEA if this can work....
+# untested
+# Port forwarding rules. Expose Kubernetes nodePort range to host
+#portForwards:
+#- guestPortRange: [30080, 30080]
+#  hostPortRange: [80, 80]
+#  hostIP:  "0.0.0.0"
 
 # Networking
 networks:
