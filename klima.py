@@ -5,7 +5,7 @@ import signal
 import subprocess
 import sys
 import signal
-from time import sleep
+from time import sleep, time
 
 
 template = "k8s-base.yaml"
@@ -146,6 +146,11 @@ def signal_handler(sig, frame):
     sys.exit(0)
         
 if __name__ == "__main__":
+    start_time = time()
+    def print_total_time():
+        total_time = time() - start_time
+        print(f"Execution time: {total_time / 60:.2f} minutes")
+
     parser = argparse.ArgumentParser(description="Manage lima VMs and disks")
     task_group = parser.add_mutually_exclusive_group(required=True)
     task_group.add_argument('--klober', action='store_true', help='remove all VMs and disks')
@@ -154,4 +159,7 @@ if __name__ == "__main__":
     parser.add_argument('--force', '-f', required=False, action='store_true', help='force remove all VMs and disks')
     args = parser.parse_args()
     signal.signal(signal.SIGINT, signal_handler)
+    
     main(args)
+
+    print_total_time()
