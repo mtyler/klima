@@ -99,11 +99,12 @@ def up_main():
     os.makedirs(CWD+klima_work_dir, exist_ok=True)
     try:
         if first_cp_name not in get_vm_names():
-            # TODO: make disks configurable
-            ## remove disk from CP to avoid conjestion from ceph
-            ##run_command("limactl disk create {}-data --size=50GiB --format=raw".format(CP))
-            ##run_command(f"limactl create --name=cp1 {template} --set '.additionalDisks[0].name = \"{}-data\" | .additionalDisks[0].format = false' --tty=false".format(CP))
-            run_command(f"limactl create --name=cp1 {template} --tty=false")
+            if args.cp1disk:
+                run_command("limactl disk create cp1-data --size=50GiB --format=raw")
+                run_command(f"limactl create --name=cp1 {template} --set '.additionalDisks[0].name = \"cp1-data\" | .additionalDisks[0].format = false' --tty=false")
+            else:
+                run_command(f"limactl create --name=cp1 {template} --tty=false")
+    
             run_command("limactl start cp1 --tty=false")
             print("Control Plane has been started")
 
@@ -120,13 +121,13 @@ def up_main():
 #        input("Ctrl+C to stop. Press Enter to add worker nodes...")
 #        #TODO: Add a parser to get -q or --quiet flag to skip the input prompt
 #        #TODO: Add a check to wait for the CP to be ready before proceeding
-
-        for node in ["n1", "n2", "n3"]:
-            print(f"Creating {node}")
-            run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
-            run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
-            run_command(f"limactl start {node} --tty=false")
-            verify_node(f"{k8s_node_prefix}{node}")
+        if not args.single:
+            for node in ["n1", "n2", "n3"]:
+                print(f"Creating {node}")
+                run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
+                run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
+                run_command(f"limactl start {node} --tty=false")
+                verify_node(f"{k8s_node_prefix}{node}")
 
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")
@@ -136,11 +137,19 @@ def up_main():
         pass
         # print("Exiting gracefully")
 
+def time_main():
+    vm_names = get_vm_names()
+    for vm_name in vm_names:
+        print(f"Setting time on {vm_name}")
+        subprocess.run(['limactl', 'shell', vm_name, 'sudo', 'timedatectl'])
+
 def main(args):
     if args.up:
         up_main()
     elif args.klober:
         klober_main(args)
+    elif args.time:
+        time_main()
 
 def signal_handler(sig, frame): 
     sys.exit(0)
@@ -155,6 +164,9 @@ if __name__ == "__main__":
     task_group = parser.add_mutually_exclusive_group(required=True)
     task_group.add_argument('--klober', action='store_true', help='remove all VMs and disks')
     task_group.add_argument('--up', action='store_true', help='stand up all VMs and disks')
+    task_group.add_argument('--time', action='store_true', help='manage node time')
+    parser.add_argument('--single', '-s', required=False, action='store_true', help='stand up cp1 only node in a k8s cluster')
+    parser.add_argument('--cp1disk', required=False, action='store_true', help='add data disk to cp1')
     parser.add_argument('--node', '-n', required=False, type=str, help='remove a single node from a k8s cluster')
     parser.add_argument('--force', '-f', required=False, action='store_true', help='force remove all VMs and disks')
     args = parser.parse_args()

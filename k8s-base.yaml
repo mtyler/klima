@@ -38,6 +38,9 @@ disk: "30GiB"
 # Storage
 mountType: "virtiofs"
 mounts:
+  ## TODO these erors are showing up when ssh'ing into the guest
+  ### bash: line 1: cd: /Users/mtyler/Workspace/kinfra: No such file or directory
+  ### bash: line 1: cd: /Users/mtyler: No such file or directory
   - location: "~/Workspace/klima/.klima/k8scfg"
     mountPoint: "/k8scfg"
     writable: true
@@ -98,6 +101,36 @@ provision:
       if [ -f /k8scfg/*.conf ]; then
         mv /k8scfg/*.conf "${backup_dir}.${i}/"
       fi
+  # install and configure time sync
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      # only run if chronyd is not present on the system
+      # chrony is required by the system to keep time in sync
+      systemctl is-active --quiet chronyd && exit 0
+      apt-get update
+      apt-get install -y chrony
+      # config chrony
+      cat <<EOF | sudo tee /etc/chrony/chrony.conf
+      confdir /etc/chrony/conf.d
+      pool ntp.ubuntu.com        iburst maxsources 4
+      pool 0.ubuntu.pool.ntp.org iburst maxsources 1
+      pool 1.ubuntu.pool.ntp.org iburst maxsources 1
+      pool 2.ubuntu.pool.ntp.org iburst maxsources 2
+      sourcedir /run/chrony-dhcp
+      sourcedir /etc/chrony/sources.d
+      keyfile /etc/chrony/chrony.keys
+      driftfile /var/lib/chrony/chrony.drift
+      ntsdumpdir /var/lib/chrony
+      logdir /var/log/chrony
+      maxupdateskew 100.0
+      rtcsync
+      makestep 1 -1 #see: https://github.com/SuperQ/chrony/blob/master/doc/faq.adoc#34-is-chronyd-allowed-to-step-the-system-clock
+      leapsectz right/UTC
+      EOF
+      systemctl enable --now chronyd
+      systemctl restart chronyd
   # See <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/>
   - mode: system
     script: |
@@ -122,8 +155,8 @@ provision:
       export DEBIAN_FRONTEND=noninteractive
       apt-get update
       # lvm2 is required by ceph/rook
-      # chrony is an attempt at resolving a time sync issue with prometheus and the kubelets
-      apt-get install -y apt-transport-https ca-certificates curl lvm2 chrony
+      apt-get install -y apt-transport-https ca-certificates curl lvm2
+      # add kubernetes repo
       VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt | sed -e 's/v//' | cut -d'.' -f1-2)
       echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${VERSION}/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
       curl -fsSL https://pkgs.k8s.io/core:/stable:/v${VERSION}/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
@@ -181,7 +214,7 @@ provision:
       set -eux -o pipefail
       # only run on control-plane node
       hostname | grep -q 'lima-cp1' || exit 0
-      # DO NOT run if k8s has been initialized
+      # DO NOT run. if admin.conf exists we ASSUME that k8s has been initialized
       test -e /etc/kubernetes/admin.conf && exit 0
       export KUBECONFIG=/etc/kubernetes/admin.conf
       #    systemctl stop kubelet
@@ -197,6 +230,9 @@ provision:
       ---
       kind: ClusterConfiguration
       apiVersion: kubeadm.k8s.io/v1beta4
+      certificateValidityPeriod: 8760h # 1 year
+      caCertificateValidityPeriod: 87600h # 10 years
+      clusterName: kubernetes
       controlPlaneEndpoint: "$(ip -4 addr show lima0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}'):6443"
       networking:
         podSubnet: "10.244.0.0/16" # --pod-network-cidr
@@ -207,7 +243,6 @@ provision:
       #
       # The following network settings are required for prometheus to gather metrics
       #
-      # apiServer:
         extraArgs:
         - name: "bind-address"
           value: "0.0.0.0"
@@ -247,8 +282,9 @@ provision:
       #!/bin/bash
       set -eux -o pipefail
       hostname | grep -q 'lima-cp1' || exit 0
+      # WARNING!! This is busted. Unable to join additional control-plane nodes at this time
       # generate kubeadm JoinConfiguration for control-plane node 
-      #
+      # 
       # TODO join command for the control-plane node is busted.
       # 
       # [download-certs] Downloading the certificates in Secret "kubeadm-certs" in the "kube-system" Namespace
@@ -284,6 +320,14 @@ provision:
       sudo /k8scfg/cp-join.sh > /k8scfg/$(hostname)-up.log 2>&1
 # Begin readiness probes
 probes:
+  - description: "chronyd to be running"
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      if ! timeout 30s bash -c "until systemctl is-active --quiet chronyd.service; do sleep 3; done"; then
+        echo >&2 "chronyd is not running yet"
+        exit 1
+      fi
   - description: "kubeadm to be installed"
     script: |
       #!/bin/bash
@@ -325,6 +369,5 @@ probes:
 message: |
   Kubernetes is being deployed. This may take a few minutes.
 
-  check node labels 
-    hint: node-cluster-role/storage=
+
   ------
