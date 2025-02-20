@@ -110,12 +110,13 @@ def up_main():
 
             # Copy the kubeconfig file to the host
             run_command(f"cp {CWD}{klima_work_dir}/admin.conf ~/.kube/config")
-            run_command("kubectl get nodes")
-            
+            print("~/.kube/config has been updated")
+
             if verify_node(f"{k8s_node_prefix}{first_cp_name}"):
-                print("Control Plane is ready. Waiting 30s to begin adding worker nodes")
-                sleep(30)
+                print("Control Plane is ready. Will wait 5s to begin adding worker nodes...")
+                sleep(5)
             else:
+                print("Something when worng. Exiting...")
                 sys.exit(1)
 
 #        input("Ctrl+C to stop. Press Enter to add worker nodes...")
