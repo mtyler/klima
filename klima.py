@@ -95,6 +95,13 @@ def run_command(command):
         print(result.stderr.decode('utf-8'))
     return #result.stdout.decode('utf-8')
 
+def create_node(k8s_node_prefix, node, template):
+        print(f"Creating {node}")
+        run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
+        run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
+        run_command(f"limactl start {node} --tty=false")
+        verify_node(f"{k8s_node_prefix}{node}")
+
 def up_main():
     os.makedirs(CWD+klima_work_dir, exist_ok=True)
     try:
@@ -124,11 +131,15 @@ def up_main():
 #        #TODO: Add a check to wait for the CP to be ready before proceeding
         if not args.single:
             for node in ["n1", "n2", "n3"]:
-                print(f"Creating {node}")
-                run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
-                run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
-                run_command(f"limactl start {node} --tty=false")
-                verify_node(f"{k8s_node_prefix}{node}")
+                if node not in get_vm_names():
+                    create_node(k8s_node_prefix, node, template)
+                else:
+                    print(f"{node} already exists")
+                #print(f"Creating {node}")
+                #run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
+                #run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
+                #run_command(f"limactl start {node} --tty=false")
+                #verify_node(f"{k8s_node_prefix}{node}")
 
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")
