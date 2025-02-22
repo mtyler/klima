@@ -30,26 +30,19 @@ images:
 # Mounts
 vmType: "vz" # only for macOS; Linux uses 'qemu'
 
-# Resources
-cpus: 2
-memory: "8GiB"
-disk: "30GiB"
+# Resources to be passed along with create command
+# cpus: 2
+# memory: "8GiB"
+# disk: "30GiB"
 
 # Storage
 mountType: "virtiofs"
 mounts:
   - location: "~"
+    writable: false
   - location: "~/Workspace/klima/.klima/k8scfg"
     mountPoint: "/k8scfg"
     writable: true
-
-#### NO IDEA if this can work....
-# untested
-# Port forwarding rules. Expose Kubernetes nodePort range to host
-#portForwards:
-#- guestPortRange: [30080, 30080]
-#  hostPortRange: [80, 80]
-#  hostIP:  "0.0.0.0"
 
 # Networking
 networks:

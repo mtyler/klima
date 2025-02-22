@@ -7,139 +7,276 @@ import sys
 import signal
 from time import sleep, time
 
-
 template = "k8s-base.yaml"
 CWD = f"{os.path.dirname(os.path.abspath(__file__))}/"
 klima_work_dir = ".klima/k8scfg"
 first_cp_name = "cp1"
 k8s_node_prefix = "lima-"
+USER_HOME_DIR = os.path.expanduser("~")
 
-
-def get_vm_names():
-    result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
-    return result.stdout.splitlines()
-
-def get_disk_names():
-    result = subprocess.run(['limactl', 'disk', 'list'], capture_output=True, text=True)
-    lines = result.stdout.splitlines()
-    disk_names = []
-    for line in lines:
-        parts = line.split()
-        if len(parts) > 0 and parts[0] != 'NAME':
-            disk_names.append(parts[0])
-    return disk_names
-
-def stop_and_remove_vm(vm_name):
-    print(f"Stopping and removing {vm_name}")
-    subprocess.run(['limactl', 'stop', vm_name])
-    subprocess.run(['limactl', 'delete', vm_name])
-
-def remove_disk(d_name):
-    subprocess.run(['limactl', 'disk', 'delete', d_name])
-
-def drain_and_remove_node(vm_name):
-    print(f"Draining and removing node {vm_name}")
-    subprocess.run(['kubectl', 'drain', f"lima-{vm_name}", '--delete-local-data', '--force', '--ignore-daemonsets'])
-    subprocess.run(['kubectl', 'delete', 'node', f"lima-{vm_name}"])
-
-
-def klober_main(args):
-    if args.node:
-        vm_names = get_vm_names()
-        if args.node in vm_names:
-            drain_and_remove_node(args.node)
-            stop_and_remove_vm(args.node)
-            print(f"VM {args.node} stopped and removed")
-        return
+class Knode:
+    k8s_prefix = "lima-"
+    template = "k8s-base.yaml"
     
-    if not args.force:
-        input("!!! WARNING !!! \n\n \
-This is a permanent action. All lima VMs and disks will be lost forever. \n \
-Press Enter to continue...\n")
+    def __init__(self, name, cpu, mem, disk_size, additional_disk_size, role):
+        self.name = name
+        self.cpu = cpu
+        self.mem = mem
+        self.disk_size = disk_size
+        self.additional_disk_size = additional_disk_size
+        self.role = role
+
+    def create(self):
+        #print(f"Creating {self.name}")
+        with_disk = ""
+        if self.additional_disk_size:
+            run_command(f"limactl disk create {self.get_diskname()} --size={self.additional_disk_size} --format=raw")
+            with_disk = f"| .additionalDisks[0].name = \"{self.get_diskname()}\" | .additionalDisks[0].format = false"
+        
+        return run_command(f"limactl create --name={self.name} {self.template} --set '.disk = \"{self.disk_size}\" | .cpus = {self.cpu} | .memory = \"{self.mem}\" {with_disk}' --tty=false")
+
+    def get_diskname(self):
+        return f"{self.name}-data"
     
-    vm_names = get_vm_names()
-    for vm_name in vm_names:
-        stop_and_remove_vm(vm_name)
-    print("VMs stopped and removed")
+    def start(self):
+        #print(f"Starting {self}")
+        run_command(f"limactl start {self.name} --tty=false")
 
-    d_names = get_disk_names()
-    for d_name in d_names:
-        remove_disk(d_name)
-    print("Disks removed")
+    def stop(self):
+        run_command(f"limactl stop {self.name}")
+
+    def is_vm(self):
+        #print(f"Checking if {self.name} is a VM")
+        return self.name in self.get_vm_names()
     
-    subprocess.run(['rm', '-rf', './.klima'])
-    print("klima working directory removed")
-
-    subprocess.run(['limactl', 'list'])
-    subprocess.run(['limactl', 'disk', 'list'])
-
-
-def get_vm_names():
-    result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
-    return result.stdout.splitlines()
-
-def verify_node(node):
-    result = subprocess.run(['kubectl', 'get', 'node', node, '-o=jsonpath={.metadata.name}'], capture_output=True, text=True)
-    if result.stdout.splitlines()[0] == node:
-        print(f"{node} is ready")
-        return True
-    else:
-        print(f"{node} is not ready")
+    def is_ready(self):
+        if not self.is_vm():
+            return False
+        node = f"{self.k8s_prefix}{self.name}"
+        #print(f"Checking if {node} is ready")
+        #result = subprocess.run(['kubectl', 'get', 'node', node, '-o=jsonpath={.metadata.name}'], capture_output=True, text=True)
+        cmd = ['kubectl', 'get', 'node', node, '-o=jsonpath={.metadata.name}']
+        result = run_cmd(cmd)
+        if result.returncode == 0:
+            print(f"{node} is ready")
+            return True
         return False
 
-def run_command(command):
-    result = subprocess.run(command, shell=True, check=True)
-    if result.stdout != None:
-        print(result.stdout.decode('utf-8'))
-    if result.stderr != None:
-        print(result.stderr.decode('utf-8'))
-    return #result.stdout.decode('utf-8')
-
-def create_node(k8s_node_prefix, node, template):
-        print(f"Creating {node}")
-        run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
-        run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
-        run_command(f"limactl start {node} --tty=false")
-        verify_node(f"{k8s_node_prefix}{node}")
-
-def up_main():
-    os.makedirs(CWD+klima_work_dir, exist_ok=True)
-    try:
-        if first_cp_name not in get_vm_names():
-            if args.cp1disk:
-                run_command("limactl disk create cp1-data --size=50GiB --format=raw")
-                run_command(f"limactl create --name=cp1 {template} --set '.additionalDisks[0].name = \"cp1-data\" | .additionalDisks[0].format = false' --tty=false")
-            else:
-                run_command(f"limactl create --name=cp1 {template} --tty=false")
+    def is_leader(self):
+        return self.role == "leader"
     
-            run_command("limactl start cp1 --tty=false")
-            print("Control Plane has been started")
+    def kill_vm(self):
+        print(f"Stopping and removing {self.name}")
+        subprocess.run(['limactl', 'stop', self.name])
+        subprocess.run(['limactl', 'delete', self.name])
 
-            # Copy the kubeconfig file to the host
-            run_command(f"cp {CWD}{klima_work_dir}/admin.conf ~/.kube/config")
-            print("~/.kube/config has been updated")
+    def pull_node(self):
+        print(f"Draining and removing node {self.name}")
+        subprocess.run(['kubectl', 'drain', f"lima-{self.name}", '--delete-local-data', '--force', '--ignore-daemonsets'])
+        subprocess.run(['kubectl', 'delete', 'node', f"lima-{self.name}"])
 
-            if verify_node(f"{k8s_node_prefix}{first_cp_name}"):
-                print("Control Plane is ready. Will wait 5s to begin adding worker nodes...")
-                sleep(5)
-            else:
-                print("Something when worng. Exiting...")
-                sys.exit(1)
+    def get_vm_names(self):
+        result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
+        return result.stdout.splitlines()
 
-#        input("Ctrl+C to stop. Press Enter to add worker nodes...")
-#        #TODO: Add a parser to get -q or --quiet flag to skip the input prompt
-#        #TODO: Add a check to wait for the CP to be ready before proceeding
-        if not args.single:
-            for node in ["n1", "n2", "n3"]:
-                if node not in get_vm_names():
-                    create_node(k8s_node_prefix, node, template)
-                else:
-                    print(f"{node} already exists")
-                #print(f"Creating {node}")
-                #run_command(f"limactl disk create {node}-data --size=50GiB --format=raw")
-                #run_command(f"limactl create --name={node} {template} --set '.additionalDisks[0].name = \"{node}-data\" | .additionalDisks[0].format = false' --tty=false")
-                #run_command(f"limactl start {node} --tty=false")
-                #verify_node(f"{k8s_node_prefix}{node}")
+    def get_disks(self):
+        result = subprocess.run(['limactl', 'disk', 'list'], capture_output=True, text=True)
+        lines = result.stdout.splitlines()
+        disk_names = []
+        for line in lines:
+            parts = line.split()
+            print(parts)
+            if len(parts) > 0 and parts[0] != 'NAME':
+                disk_names.append(parts[0])
+        return disk_names
+
+    def remove_disk(self):
+        subprocess.run(['limactl', 'disk', 'delete', self.get_diskname()])
+
+class Kluster:
+    # Node Role:
+    # leader is the initial control plane node
+    # follower is a control plane node that joins the cluster after the leader
+    # worker is a node that joins the cluster after the control plane nodes
+    # Disk Size:
+    # disk_size is the size of the default disk
+    # raw_disk_size is the size of the additional raw disk attached to the node 0 or null if no disk is attached 
+    SINGLE_NODE_TOPOLOGY = {
+        #"cp1": {"cpu": 2, "mem": 4, "disk_size": "30GiB", "raw_disk_size": "50GiB", "role": "leader"}
+        Knode("cp1", 2, "8GiB", "30GiB", "100GiB", "leader")
+    }
+
+    FOUR_NODE_TOPOLOGY = {
+        #"n3":  {"cpu": 2, "mem": 4, "disk_size": "30GiB", "raw_disk_size": "50GiB", "role": "worker"}
+        Knode("cp1", 4, "8GiB", "30GiB", "30GiB", "leader"),
+        Knode("n1",  4, "8GiB", "30GiB", "50GiB", "worker"),
+        Knode("n2",  4, "8GiB", "30GiB", "50GiB", "worker"),
+        Knode("n3",  4, "8GiB", "30GiB", "50GiB", "worker")
+    }
+    work_dir = f"{CWD}.klima/k8scfg"
+    config_dir = f"{USER_HOME_DIR}/.kube"
+    template = "k8s-base.yaml"
+
+    def __init__(self, topology=None):
+        if topology is None:
+            self.topology = self.FOUR_NODE_TOPOLOGY
+            self.name = "FOUR_NODE_TOPOLOGY"
+        else:
+            self.topology = topology
+
+    def is_up(self):
+        return self.get_leader().is_ready()
+
+    def get_nodes(self):
+        return [node for node in self.topology]
+    
+    def get_vm_names(self):
+        result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
+        return result.stdout.splitlines()
+    
+    def get_leader(self):
+        for node in self.topology:
+            if node.role == "leader":
+                return node
+    
+    def get_followers(self):
+        followers = []
+        for node in self.topology:
+            if self.topology[node].role == "follower":
+                followers.append(node)
+        return followers
+    
+    def get_workers(self):
+        workers = []
+        for node in self.topology:
+            if node.role == "worker":
+                workers.append(node)
+        
+        print(f"# workers is {len(workers)}")
+        return workers
+    
+    def get_kubeconfig(self):
+        # Copy the kubeconfig file to the host
+        print("Updating ~/.kube/config...")
+        subprocess.run(['cp', f"{self.work_dir}/admin.conf", f"{self.config_dir}/config"])
+
+    def create(self):
+        print(f"Creating cluster {self.name}")
+        os.makedirs(self.work_dir, exist_ok=True)
+
+    def destroy(self):
+        print(f"Destroying cluster {self.name}")
+        run_command(f"rm -rf {self.work_dir}")
+
+def run_cmd(command):
+    try: 
+        if isinstance(command, list):
+            result = subprocess.run(command)
+        else:
+            result = subprocess.run(command, shell=True)
+        if result.stderr:
+            print(result.stderr.decode('utf-8'))
+        return result
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    finally:
+        pass
+
+
+def run_command(command):
+    if isinstance(command, list):
+        result = subprocess.run(command, capture_output=True, text=True)
+    else:
+        result = subprocess.run(command, shell=True)
+    if result.stdout:
+        print(result.stdout.decode('utf-8'))
+    if result.stderr:
+        print(result.stderr.decode('utf-8'))
+    return
+
+##def stop_and_remove_vm(vm_name):
+##    print(f"Stopping and removing {vm_name}")
+##    subprocess.run(['limactl', 'stop', vm_name])
+##    subprocess.run(['limactl', 'delete', vm_name])
+##
+##def remove_disk(d_name):
+##    subprocess.run(['limactl', 'disk', 'delete', d_name])
+##
+##def drain_and_remove_node(vm_name):
+##    print(f"Draining and removing node {vm_name}")
+##    subprocess.run(['kubectl', 'drain', f"lima-{vm_name}", '--delete-local-data', '--force', '--ignore-daemonsets'])
+##    subprocess.run(['kubectl', 'delete', 'node', f"lima-{vm_name}"])
+
+##def klober_main(args):
+##    if args.node:
+##        vm_names = get_vm_names()
+##        if args.node in vm_names:
+##            drain_and_remove_node(args.node)
+##            stop_and_remove_vm(args.node)
+##            print(f"VM {args.node} stopped and removed")
+##        return
+##    
+##    if not args.force:
+##        input("!!! WARNING !!! \n\n \
+##This is a permanent action. All lima VMs and disks will be lost forever. \n \
+##Press Enter to continue...\n")
+##    
+##    vm_names = get_vm_names()
+##    for vm_name in vm_names:
+##        stop_and_remove_vm(vm_name)
+##    print("VMs stopped and removed")
+##
+##    d_names = get_disk_names()
+##    for d_name in d_names:
+##        remove_disk(d_name)
+##    print("Disks removed")
+##    
+##    subprocess.run(['rm', '-rf', './.klima'])
+##    print("klima working directory removed")
+##
+##    subprocess.run(['limactl', 'list'])
+##    subprocess.run(['limactl', 'disk', 'list'])
+
+
+##def get_disk_names():
+##    result = subprocess.run(['limactl', 'disk', 'list'], capture_output=True, text=True)
+##    lines = result.stdout.splitlines()
+##    disk_names = []
+##    for line in lines:
+##        parts = line.split()
+##        if len(parts) > 0 and parts[0] != 'NAME':
+##            disk_names.append(parts[0])
+##    return disk_names
+##
+##def get_vm_names():
+##    result = subprocess.run(['limactl', 'list', '--format', '{{.Name}}'], capture_output=True, text=True)
+##    return result.stdout.splitlines()
+##
+##def verify_node(node):
+##    result = subprocess.run(['kubectl', 'get', 'node', node, '-o=jsonpath={.metadata.name}'], capture_output=True, text=True)
+##    if result.stdout.splitlines()[0] == node:
+##        print(f"{node} is ready")
+##        return True
+##    else:
+##        print(f"{node} is not ready")
+##        return False
+
+## Bring up an individual node
+def node_up(node):
+    #print(f"Bringing up node {node.name}")
+    try:
+        if not node.is_vm():
+            node.create()
+
+        # we need to do something a little different for the leader node
+        if node.is_leader():
+            node.start()
+        elif not node.is_ready():
+            node.start()
+        else:
+            print(f"{node.name} is ready. Nothing to do.")
 
     except subprocess.CalledProcessError as e:
         print(f"An error occurred: {e}")
@@ -147,22 +284,46 @@ def up_main():
         print(f"An unexpected error occurred: {e}")
     finally:
         pass
-        # print("Exiting gracefully")
 
-def time_main():
-    vm_names = get_vm_names()
-    for vm_name in vm_names:
-        print(f"Setting time on {vm_name}")
-        subprocess.run(['limactl', 'shell', vm_name, 'sudo', 'timedatectl'])
+## Tear down an individual node
+def node_down(node):
+    print(f"Bringing down node {node.name}")
+    node.kill_vm()
+    node.remove_disk()
+
+## Bring up a cluster topology
+def cluster_up(cluster):
+    if not cluster.is_up():
+        cluster.create()
+        # 1st Task: Start the initial control plane
+        leader = cluster.get_leader()
+        node_up(leader)
+        cluster.get_kubeconfig()
+    
+    for node in cluster.get_workers():
+        print(f"Bring up worker {node.name}")
+        node_up(node)
+
+## Tear down a cluster topology
+def cluster_down(cluster, force=False):
+    if not force:
+        input("!!! WARNING !!! \n\n \
+This is a permanent action. All lima VMs and disks will be lost forever. \n \
+Press Enter to continue...\n")
+    
+    for node in cluster.get_nodes():
+        node_down(node)
+    
 
 def main(args):
+    cluster = Kluster()
     if args.up:
-        up_main()
+        cluster_up(cluster)
     elif args.klober:
-        klober_main(args)
-    elif args.time:
-        time_main()
-
+#        klober_main(args)
+        cluster_down(cluster, args.force)
+        cluster.destroy()
+ 
 def signal_handler(sig, frame): 
     sys.exit(0)
         

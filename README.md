@@ -1,58 +1,25 @@
 # Klima
 
-A just-enough-k8s cluster built on Lima VM.
+Is a slightly opinionated wrapper script around Lima VM. The purpose is to create a minimally viable, just-enough-k8s cluster to operate kubernetes in a local (re: laptop) environment. Kubernetes is deployed with kubeadm on ubuntu Lima VMs. 
+
+Klima provisions a Virtual Machine based kubernetes cluster and facilitates the attachment of raw disks. 
 
 Meant to standup and teardown quickly and easily.
 
-## Usage
+## Dependancies and Pre-reqs
 
-klima-up.py - starts a 4 node cluster
-
-klima-klober.py deletes all lima disks and vms
-
-below are setup notes that require cleaning...
-TODO - networking requires some tightening up
-TODO - code, file hygene
-TODO - Document listening 0.0.0.0
-TODO - tighten up file paths
-TODO - configuration hand-off is messy
-
-## development environment
-
-currently we need to create a virtual python environment
 Lima VM (brew install)
 socket_vmnet (binary install)
 qemu (brew install)
-
 Python3 (brew install)
 
+## Usage
 
-## prereqs
+Beware... this is still a bit WIPy
 
-- ~~socket_vmnet installed from binary with launchd service: https://github.com/lima-vm/socket_vmnet?tab=readme-ov-file#from-binary~~
+klima.py --up starts a 4 node cluster
 
-- ~~configure socket_vmnet networking https://lima-vm.io/docs/config/network/#socket_vmnet~~
-
-- ~~get info: sudo launchctl print system/io.github.lima-vm.socket_vmnet | grep state~~
-
-## Setup 
-
-~~1. verify paths.socketVMNet matches installed socket_vmnet~~
-
-1. limactl create --set='.networks[].macAddress="52:55:55:12:34:01"' --name cp-1 machines/ubuntu-lts-machine.yaml --tty=false
-1. limactl create --set='.networks[].macAddress="52:55:55:12:34:04"' --name worker-1 machines/ubuntu-lts-machine.yaml --tty=false
-
-1. limactl sudoers > etc_sudoers.d_lima && sudo install -o root etc_sudoers.d_lima /private/etc/sudoers.d/lima && rm etc_sudoers.d_lima
-limactl sudoers >etc_sudoers.d_lima && sudo install -o root etc_sudoers.d_lima "/private/etc/sudoers.d/lima"
-
-1. limactl start cp-1
-1. limactl start worker-1
-
-1. limactl sudoers | sudo tee /etc/sudoers.d/lima
-1. limactl create --network=lima:shared template://default
-
-1. replace default ~/.lima/_config/networks.yaml
-
+klima.py --klober deletes the cluster
 
 
 ### verify socket_vmnet & QEMU
@@ -66,22 +33,6 @@ brew install qemu
 mkdir -p /var/run sudo /opt/socket_vmnet/bin/socket_vmnet --vmnet-gateway=192.168.105.1 /var/run/socket_vmnet
 
 
-
-## starting from the provided lima k8s.yaml template
-
-
-limactl disk create cp1-data --size=50GB --format=raw
-limactl create --name cp1 ./k8s.yaml --tty=false
-limactl start cp1
-cp /Users/mtyler/.lima/cp1/copied-from-guest/kubeconfig.yaml ~/.kube/config
-kubectl get nodes
-
-
-limactl disk create 
-
-sudo lsblk -o NAME,FSTYPE,SIZE,MOUNTPOINT,LABEL
-
-
 ## storage
 lima provides ext4 formatted partition
 
@@ -89,16 +40,22 @@ ceph / rook - required unpartitioned drive
 nfs is possible but does not provide the type of service falco requires
 topolvm - requires a Volume Group. VG requires a non-partitioned disk
 
-### minio
-minio requires the drive to be configured/initialized with DirectPV
 
 
-## Additional nodes
+### Issues
 
-generate the controlplane join command on cp1
-kubeadm token create --print-join-command --certificate-key $(kubeadm certs certificate-key)
+#### time is not staying up to date
+installed and configured chrony
+issue is slightly better but still persists
 
-generate the worker join command on cp1
-kubeadm token create --print-join-command 
-- or - 
-use command aboave and strip off "control plane and certificate
+[ 1128.763113] rcu: INFO: rcu_preempt self-detected stall on CPU
+[ 1128.763203] rcu: 	0-...!: (6 ticks this GP) idle=4a6c/1/0x4000000000000002 softirq=71946/71948 fqs=0
+[ 1128.763208] rcu: 	(t=3002413905695 jiffies g=82521 q=3405 ncpus=2)
+[ 1128.763213] rcu: rcu_preempt kthread timer wakeup didn't happen for 3002413905692 jiffies! g82521 f0x0 RCU_GP_WAIT_FQS(5) ->state=0x402
+[ 1128.763216] rcu: 	Possible timer handling issue on cpu=1 timer-softirq=18806
+[ 1128.763218] rcu: rcu_preempt kthread starved for 3002413905695 jiffies! g82521 f0x0 RCU_GP_WAIT_FQS(5) ->state=0x402 ->cpu=1
+[ 1128.763221] rcu: 	Unless rcu_preempt kthread gets sufficient CPU time, OOM is now expected behavior.
+[ 1128.763223] rcu: RCU grace-period kthread stack dump:
+[ 1128.763225] task:rcu_preempt     state:I stack:0     pid:17    tgid:17    ppid:2      flags:0x00000008
+
+increased cpu to 4, mem left at 8GB
