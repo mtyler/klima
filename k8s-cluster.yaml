@@ -48,8 +48,7 @@ mounts:
 networks:
   - lima: shared
 
-# Runtime
-# containerd
+# Runtime containerd
 containerd:
   system: true
   user: false
@@ -124,6 +123,25 @@ provision:
       EOF
       systemctl enable --now chronyd
       systemctl restart chronyd
+  ##  # See <https://kubernetes.io/docs/setup/production-environment/container-runtimes/>
+  ##  - mode: system
+  ##    script: |
+  ##      #!/bin/bash
+  ##      set -eux -o pipefail
+  ##      systemctl is-active --quiet containerd && exit 0
+  ##      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+  ##      echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+  ##      apt-get update -y
+  ##      apt-get install -y containerd.io
+  ##      # generate default containerd config
+  ##      containerd config default > config.toml
+  ##      mv config.toml /etc/containerd/config.toml
+  ##      # update settings required by k8s
+  ##      sudo sed -i 's/^disabled_plugins \=/\#disabled_plugins \=/g' /etc/containerd/config.toml
+  ##      sudo sed -i 's/SystemdCgroup \= false/\SystemdCgroup \= true/g' /etc/containerd/config.toml
+  ##      # Configuring the systemd cgroup driver
+  ##      systemctl enable --now containerd
+  ##      systemctl restart containerd
   # See <https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/>
   - mode: system
     script: |
@@ -164,27 +182,51 @@ provision:
       rm -f /etc/cni/net.d/*.conf*
       apt-get install -y kubelet kubeadm kubectl && apt-mark hold kubelet kubeadm kubectl
       systemctl enable --now kubelet
-  # See <https://kubernetes.io/docs/setup/production-environment/container-runtimes/>
+  ##  # See <https://kubernetes.io/docs/setup/production-environment/container-runtimes/>
   - mode: system
     script: |
       #!/bin/bash
       set -eux -o pipefail
-      grep SystemdCgroup /etc/containerd/config.toml && exit 0
-      grep "version = 2" /etc/containerd/config.toml || exit 1
+      grep 'SystemdCgroup = true' /etc/containerd/config.toml && exit 0
+      #grep "version = 2" /etc/containerd/config.toml || exit 1
+      # generate default containerd config
+      containerd config default > config.toml
+      mv config.toml /etc/containerd/config.toml
+      # update settings required by k8s
+      sed -i 's/^disabled_plugins \=/\#disabled_plugins \=/g' /etc/containerd/config.toml
       # Configuring the systemd cgroup driver
-      # Overriding the sandbox (pause) image
-      cat <<EOF >>/etc/containerd/config.toml
-        [plugins]
-          [plugins."io.containerd.grpc.v1.cri"]
-            sandbox_image = "$(kubeadm config images list | grep pause | sort -r | head -n1)"
-            [plugins."io.containerd.grpc.v1.cri".containerd]
-              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-                  runtime_type = "io.containerd.runc.v2"
-                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
-                    SystemdCgroup = true
-      EOF
+      sed -i 's/SystemdCgroup \= false/\SystemdCgroup \= true/g' /etc/containerd/config.toml
+      # update sandbox_image
+      #sudo sed -i 's/sandbox_image \= \"\"/sandbox_image \= \"$(kubeadm config images list | grep pause | sort -r | head -n1)\"/g' /etc/containerd/config.toml
+      # append stargz to [proxy_plugins]
+      sed -i '/\[proxy_plugins\]/a [proxy_plugins."stargz"]\n  type = "snapshot"\n  address = "\/run\/containerd-stargz-grpc\/containerd-stargz-grpc.sock"' /etc/containerd/config.toml
       systemctl restart containerd
+  #  # See <https://kubernetes.io/docs/setup/production-environment/container-runtimes/>
+  #  - mode: system
+  #    script: |
+  #      #!/bin/bash
+  #      # version = 2
+  #      #  [proxy_plugins]
+  #      #    [proxy_plugins."stargz"]
+  #      #      type = "snapshot"
+  #      #      address = "/run/containerd-stargz-grpc/containerd-stargz-grpc.sock"
+  #      set -eux -o pipefail
+  #      grep SystemdCgroup /etc/containerd/config.toml && exit 0
+  #      grep "version = 2" /etc/containerd/config.toml || exit 1
+  #      # Configuring the systemd cgroup driver
+  #      ### Overriding the sandbox (pause) image
+  #      cat <<EOF >>/etc/containerd/config.toml
+  #        [plugins]
+  #          [plugins."io.containerd.grpc.v1.cri"]
+  #            sandbox_image = "$(kubeadm config images list | grep pause | sort -r | head -n1)"
+  #            [plugins."io.containerd.grpc.v1.cri".containerd]
+  #              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+  #                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  #                  runtime_type = "io.containerd.runc.v2"
+  #                  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+  #                    SystemdCgroup = true
+  #      EOF
+  #      systemctl restart containerd
   - mode: system
     script: |
       #!/bin/bash
