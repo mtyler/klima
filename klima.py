@@ -5,7 +5,7 @@ import signal
 import subprocess
 import sys
 import signal
-from time import sleep, time
+import time
 
 CWD = f"{os.path.dirname(os.path.abspath(__file__))}/"
 klima_work_dir = ".klima/k8scfg"
@@ -100,12 +100,12 @@ class Knode:
 
 class Kluster:
     # Node Role:
-    # leader is the initial control plane node
-    # follower is a control plane node that joins the cluster after the leader
-    # worker is a node that joins the cluster after the control plane nodes
+    # leader   - is the initial control plane node
+    # follower - is a control plane node that joins the cluster after the leader
+    # worker   - is a node that joins the cluster after the control plane nodes
     # Disk Size:
-    # disk_size is the size of the default disk
-    # raw_disk_size is the size of the additional raw disk attached to the node 0 or null if no disk is attached 
+    # disk_size     - is the size of the default disk
+    # raw_disk_size - is the size of the additional raw disk attached to the node 0 or null if no disk is attached 
     SINGLE_NODE_TOPOLOGY = {
         #"cp1": {"cpu": 2, "mem": 4, "disk_size": "30GiB", "raw_disk_size": "50GiB", "role": "leader"}
         Knode("cp1", 2, "8GiB", "30GiB", "100GiB", "leader")
@@ -113,10 +113,15 @@ class Kluster:
 
     FOUR_NODE_TOPOLOGY = {
         #"n3":  {"cpu": 2, "mem": 4, "disk_size": "30GiB", "raw_disk_size": "50GiB", "role": "worker"}
-        Knode("cp1", 4, "4GiB", "30GiB", "30GiB", "leader"),
-        Knode("n1",  4, "4GiB", "30GiB", "50GiB", "worker"),
-        Knode("n2",  4, "4GiB", "30GiB", "50GiB", "worker"),
-        Knode("n3",  4, "4GiB", "30GiB", "50GiB", "worker")
+        #####Allocated:	Requests	Limits  @ 4cpu 4GBmem
+        #####lima-cp1 memory 290Mi (7%) 340Mi (8%)
+        #####lima-n1 memory 2482Mi (65%) 4864Mi (127%)
+        #####lima-n2 memory 2810Mi (73%) 5376Mi (141%)
+        #####lima-n3 memory 1786Mi (46%) 3Gi (80%)
+        Knode("cp1", 4, "6GiB", "30GiB", "30GiB", "leader"),
+        Knode("n1",  4, "6GiB", "30GiB", "50GiB", "worker"),
+        Knode("n2",  4, "6GiB", "30GiB", "50GiB", "worker"),
+        Knode("n3",  4, "6GiB", "30GiB", "50GiB", "worker")
     }
     work_dir = f"{CWD}.klima/k8scfg"
     config_dir = f"{USER_HOME_DIR}/.kube"
@@ -171,10 +176,6 @@ class Kluster:
         if debug: print("Updating ~/.kube/config...")
         subprocess.run(['cp', f"{self.work_dir}/admin.conf", f"{self.config_dir}/config"])
 
-#    def create(self):
-#        print(f"Creating cluster {self.name}")
-#        os.makedirs(self.work_dir, exist_ok=True)
-
     def destroy(self):
         if debug: print(f"Destroying cluster {self.name}")
         run_cmd(f"rm -rf {self.work_dir}")
@@ -212,11 +213,9 @@ def node_up(node):
     try:
         if not node.is_vm():
             node.create()
-
-        # we need to do something a little different for the leader node
-        if node.is_leader():
-            node.start()
-        elif not node.is_ready():
+        # wait a tick to let the VM start
+        time.sleep(1)
+        if node.is_vm():
             node.start()
         else:
             print(f"{node.name} is ready. Nothing to do.")
@@ -230,14 +229,13 @@ def node_up(node):
 
 ## Tear down an individual node
 def node_down(node):
-    # print(f"Bringing down node {node.name}")
+    if debug: print(f"Bringing down node {node.name}")
     node.kill_vm()
     node.remove_disk()
 
 ## Bring up a cluster topology
 def cluster_up(cluster):
     if not cluster.is_up():
-        #cluster.create()
         # 1st Task: Start the initial control plane
         leader = cluster.get_leader()
         node_up(leader)
@@ -259,7 +257,6 @@ Press Enter to continue...\n")
     
     print(f"VMs remaining: {cluster.get_vm_names()}")
     print(f"Disks remaining: {cluster.get_disk_names()}")
-    
 
 def main(args):
     cluster = Kluster()
@@ -268,11 +265,11 @@ def main(args):
     elif args.klober:
         cluster_down(cluster, args.force)
         cluster.destroy()
- 
+
 if __name__ == "__main__":
-    start_time = time()
+    start_time = time.time()
     def print_total_time():
-        total_time = time() - start_time
+        total_time = time.time() - start_time
         print(f"Execution time: {total_time / 60:.2f} minutes")
 
     def signal_handler(sig, frame):
@@ -281,12 +278,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Manage lima VMs and disks")
     task_group = parser.add_mutually_exclusive_group(required=True)
-    task_group.add_argument('--klober', action='store_true', help='remove all VMs and disks')
-    task_group.add_argument('--up', action='store_true', help='stand up all VMs and disks')
+    task_group.add_argument('--klober', '-k', action='store_true', help='remove all VMs and disks')
+    task_group.add_argument('--up', '-u', action='store_true', help='stand up all VMs and disks')
     task_group.add_argument('--time', action='store_true', help='manage node time')
-    parser.add_argument('--single', '-s', required=False, action='store_true', help='stand up cp1 only node in a k8s cluster')
-    parser.add_argument('--cp1disk', required=False, action='store_true', help='add data disk to cp1')
-    parser.add_argument('--node', '-n', required=False, type=str, help='remove a single node from a k8s cluster')
     parser.add_argument('--force', '-f', required=False, action='store_true', help='force remove all VMs and disks')
     parser.add_argument('--debug', '-d', required=False, action='store_true', help='debug mode')
     args = parser.parse_args()

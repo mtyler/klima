@@ -1,6 +1,9 @@
 # Klima
 
-Klima is a slightly opinionated wrapper script around Lima VM. The purpose is to create a minimally viable, just-enough-k8s cluster to operate Kubernetes in a local (re: laptop) environment. Kubernetes is deployed with kubeadm on Ubuntu Lima VMs.
+Klima is a wrapper script to start and stop Lima VMs. The template used here deploys Kubernetes with kubeadm on Ubuntu. The purpose is 
+
+1. to create a minimally viable, just-enough-k8s cluster to operate Kubernetes in a local (re: laptop) environment.
+2. to create a cluster template, compatible with vanilla Lima VM 
 
 Klima provisions a Virtual Machine-based Kubernetes cluster and facilitates the attachment of raw disks. It is meant to stand up and tear down quickly and easily.
 
@@ -37,6 +40,33 @@ sudo /opt/socket_vmnet/bin/socket_vmnet --vmnet-gateway=192.168.105.1 /var/run/s
 
 ### Issues
 
-- Time is Not Staying Up to Date: Chrony has been installed but something is causeing the clock to jump forward. When this happens, the only resolution I'vefound is to restart the node.
+##### Issue: Time is Not Staying Up to Date: Chrony has been installed but something is causeing the clock to jump forward. When this happens, the only resolution I'vefound is to restart the node.
+
+- DNS settings in coredns configmap. forward . 8.8.8.8 instead of resolve.conf
+
+unable to set time after sync issue
+
+timedatectl set-time '2025-02-25 10:00:00' < should work but doesn't
+
+chronyc -a 'burst 4/4'
+200 OK
+200 OK
+# chronyc -a makestep
+200 OK
+
+l shell cp1 sudo chronyc -N 'sources -a -v'
 
 
+##### Issue: Error: failed to reserve container name "kube-scheduler_kube-scheduler-lima-cp1_kube-system_84cee8be17e4518a644c3a40e1d0b7d2_3":
+- kubelet unable to start pods.
+possibly caused by containerd restart 
+
+List and remove pods
+sudo crictl pods
+sudo crictl stopp 38eb2f5bfb1ec
+sudo crictl rmp 38eb2f5bfb1ec
+
+timedatectl list-timezones | egrep -o "America/N.*"
+
+systemctl list-units | grep failed
+sudo journalctl -u cloud-final.service
